@@ -42,7 +42,7 @@ public class UserIdCauseDeterminantTest {
         determinant.setJenkinsUserBuildVars(cause, outputVars);
         System.out.println(outputVars);
         // 'anonymous' user gets authenticated group automatically
-        assertThat(outputVars.get("BUILD_USER_GROUPS"), is(equalTo("authenticated")));
+        assertThat(outputVars.get("BUILD_USER_GROUPS"), is(equalTo("")));
     }
 
     @Test

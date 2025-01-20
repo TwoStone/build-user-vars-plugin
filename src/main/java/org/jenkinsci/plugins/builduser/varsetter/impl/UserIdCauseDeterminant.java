@@ -2,7 +2,8 @@ package org.jenkinsci.plugins.builduser.varsetter.impl;
 
 import hudson.model.Cause.UserIdCause;
 
-import java.util.Collection;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 import hudson.security.SecurityRealm;
@@ -13,9 +14,13 @@ import org.jenkinsci.plugins.builduser.varsetter.IUsernameSettable;
 import hudson.security.ACL;
 import hudson.tasks.Mailer;
 import hudson.model.User;
+
 import java.util.logging.Logger;
+import java.util.stream.Collectors;
+
 import jenkins.model.Jenkins;
 import org.jenkinsci.plugins.saml.SamlSecurityRealm;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 
 /**
@@ -50,36 +55,38 @@ public class UserIdCauseDeterminant implements IUsernameSettable<UserIdCause> {
 
 			String trimmedUserId = StringUtils.trimToEmpty(cause.getUserId());
 			String originalUserid = trimmedUserId.isEmpty() ? ACL.ANONYMOUS_USERNAME : trimmedUserId;
-			String userid = originalUserid;
-			StringBuilder groupString = new StringBuilder();
-			try {
-				Jenkins jenkinsInstance = Jenkins.get();
-				SecurityRealm realm = jenkinsInstance.getSecurityRealm();
-				userid = mapUserId (userid, realm);
-				Collection<? extends GrantedAuthority> authorities = realm.loadUserByUsername2(originalUserid).getAuthorities();
-				for (GrantedAuthority authority : authorities) {
-					String authorityString = authority.getAuthority();
-					if (authorityString != null && authorityString.length() > 0) {
-						groupString.append(authorityString).append(",");
-					}
-				}
-				groupString.setLength(groupString.length() == 0 ? 0 : groupString.length() - 1);
-			} catch (Exception err) {
-				// Error
-				log.warning(String.format("Failed to get groups for user: %s error: %s ", userid, err));
-			}
-			variables.put(BUILD_USER_ID, userid);
-			variables.put(BUILD_USER_VAR_GROUPS, groupString.toString());
 
+			Jenkins jenkinsInstance = Jenkins.get();
+			SecurityRealm realm = jenkinsInstance.getSecurityRealm();
+			String userid = mapUserId(originalUserid, realm);
 
+			String groupString = "";
 			User user = User.getById(originalUserid, false);
-			if (null != user) {
+			if (user != null) {
+				try {
+					List<String> groups = new ArrayList<>();
+					Authentication authentication = user.impersonate2();
+ 					groups.addAll(authentication.getAuthorities()
+							.stream()
+							.map(GrantedAuthority::getAuthority)
+							.filter(s -> s != null && !s.isEmpty())
+							.collect(Collectors.toList()));
+
+					groupString = String.join(",", groups);
+				} catch (Exception err) {
+					// Error
+					log.warning(String.format("Failed to get groups for user: %s error: %s ", userid, err));
+				}
+
 				Mailer.UserProperty prop = user.getProperty(Mailer.UserProperty.class);
 				if (null != prop) {
-					String adrs = StringUtils.trimToEmpty(prop.getAddress());
-					variables.put(BUILD_USER_EMAIL, adrs);
+					String addrs = StringUtils.trimToEmpty(prop.getAddress());
+					variables.put(BUILD_USER_EMAIL, addrs);
 				}
 			}
+
+			variables.put(BUILD_USER_ID, userid);
+			variables.put(BUILD_USER_VAR_GROUPS, groupString);
 
 			return true;
 		} else {
